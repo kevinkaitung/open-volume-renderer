@@ -78,6 +78,14 @@ general_log_cb(const char* log, size_t sizeof_log)
 #endif
 }
 
+struct Pipeline {
+  OptixPipeline handle{};
+  OptixPipelineCompileOptions compile_opts{};
+  OptixPipelineLinkOptions link_opts{};
+};
+
+Pipeline pipeline_raymarching, pipeline_pathtracing;
+
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
 
@@ -257,10 +265,15 @@ DeviceOptix7::Impl::render()
   params.frame_index++;
   params.frame.size_rcp = vec2f(1.f) / vec2f(params.frame.size);
 
-  if (params.enable_path_tracing)
+  OptixPipeline active_pipeline{};
+
+  if (params.enable_path_tracing) {
     stb_current = &sbt_pathtracing_main.sbt;
-  else
+    active_pipeline = pipeline_pathtracing.handle;
+  } else {
     stb_current = &sbt_raymarching_main.sbt;
+    active_pipeline = pipeline_raymarching.handle;
+  }
 
 
   /* the number of kernels to launch for optix7 */
@@ -270,12 +283,17 @@ DeviceOptix7::Impl::render()
   /* this has to be the last step! */
   params_buffer.upload_async(&params, 1, framebuffer_stream);
 
-  OPTIX_CHECK(optixLaunch(/*! pipeline we're launching launch: */
-                          pipeline.handle, framebuffer_stream,
-                          /*! parameters and SBT */
-                          params_buffer.d_pointer(), params_buffer.sizeInBytes, stb_current,
-                          /*! dimensions of the launch: */
-                          launch_dims.x, launch_dims.y, launch_dims.z));
+  // OPTIX_CHECK(optixLaunch(/*! pipeline we're launching launch: */
+  //                         pipeline.handle, framebuffer_stream,
+  //                         /*! parameters and SBT */
+  //                         params_buffer.d_pointer(), params_buffer.sizeInBytes, stb_current,
+  //                         /*! dimensions of the launch: */
+  //                         launch_dims.x, launch_dims.y, launch_dims.z));
+  
+  OPTIX_CHECK(optixLaunch(
+  active_pipeline, framebuffer_stream,  // <-- use active_pipeline, not pipeline.handle
+  params_buffer.d_pointer(), params_buffer.sizeInBytes, stb_current,
+  launch_dims.x, launch_dims.y, launch_dims.z));
 
   parent->variance = 0.f; /* TODO compute real variance */
 }
@@ -393,7 +411,13 @@ DeviceOptix7::Impl::createContext()
     throw std::runtime_error("[optix7] Error querying current context");
   }
 
-  OPTIX_CHECK(optixDeviceContextCreate(cuda_context, 0, &optix_context));
+  // for debuging
+  OptixDeviceContextOptions options = {};
+  options.validationMode = OPTIX_DEVICE_CONTEXT_VALIDATION_MODE_ALL;
+  options.logCallbackFunction = &context_log_cb;
+  options.logCallbackLevel = 4;
+
+  OPTIX_CHECK(optixDeviceContextCreate(cuda_context, &options, &optix_context));
   OPTIX_CHECK(optixDeviceContextSetLogCallback(optix_context, context_log_cb, nullptr, 4));
 
   framebuffer.create();
@@ -470,22 +494,47 @@ DeviceOptix7::Impl::createPipeline()
 
   char log[2048];
   size_t sizeof_log = sizeof(log);
-  OPTIX_CHECK(optixPipelineCreate(optix_context, &pipeline.compile_opts, &pipeline.link_opts, programs.data(),
-                                  (int)programs.size(), log, &sizeof_log, &pipeline.handle));
+  
+  // raymarching pipeline - only raymarching programs
+  std::vector<OptixProgramGroup> rm_programs = {
+    sbt_raymarching_main.raygen,
+    sbt_raymarching_main.misses[0],
+    sbt_raymarching_main.misses[1],
+    sbt_raymarching_main.hitgroups[0],
+    sbt_raymarching_main.hitgroups[1],
+  };
+  OPTIX_CHECK(optixPipelineCreate(optix_context, 
+    &pipeline.compile_opts, &pipeline.link_opts,
+    rm_programs.data(), rm_programs.size(),
+    log, &sizeof_log, &pipeline_raymarching.handle));
+
+  // pathtracing pipeline - only pathtracing programs
+  std::vector<OptixProgramGroup> pt_programs = {
+    sbt_pathtracing_main.raygen,
+    sbt_pathtracing_main.misses[0],
+    sbt_pathtracing_main.hitgroups[0],
+  };
+  OPTIX_CHECK(optixPipelineCreate(optix_context,
+    &pipeline.compile_opts, &pipeline.link_opts,
+    pt_programs.data(), pt_programs.size(),
+    log, &sizeof_log, &pipeline_pathtracing.handle));
+  
+  // OPTIX_CHECK(optixPipelineCreate(optix_context, &pipeline.compile_opts, &pipeline.link_opts, programs.data(),
+  //                                 (int)programs.size(), log, &sizeof_log, &pipeline.handle));
   general_log_cb(log, sizeof_log);
 
-  OPTIX_CHECK(optixPipelineSetStackSize(/* [in] The pipeline to configure the stack size for */
-                                        pipeline.handle,
-                                        /* [in] The direct stack size requirement for
-                                                direct callables from IS or AH. */
-                                        2 * 1024,
-                                        /* [in] The direct stack size requirement for
-                                                direct callables from RG, MS, or CH. */
-                                        2 * 1024,
-                                        /* [in] The continuation stack requirement. */
-                                        2 * 1024,
-                                        /* [in] The maximum depth of a traversable graph passed to trace. */
-                                        3));
+  // OPTIX_CHECK(optixPipelineSetStackSize(/* [in] The pipeline to configure the stack size for */
+  //                                       pipeline.handle,
+  //                                       /* [in] The direct stack size requirement for
+  //                                               direct callables from IS or AH. */
+  //                                       2 * 1024,
+  //                                       /* [in] The direct stack size requirement for
+  //                                               direct callables from RG, MS, or CH. */
+  //                                       2 * 1024,
+  //                                       /* [in] The continuation stack requirement. */
+  //                                       2 * 1024,
+  //                                       /* [in] The maximum depth of a traversable graph passed to trace. */
+  //                                       3));
 }
 
 /*! does all setup for the raygen program(s) we are going to use */
