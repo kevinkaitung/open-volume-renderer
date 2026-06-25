@@ -165,12 +165,63 @@ auto render_to_framebuffer = [](ovr::MainRenderer& renderer) {
         return fb;
 };
 
+// TODO: consolidate into 'render_to_framebuffer'
+auto render_to_framebuffer_accumulated = [](ovr::MainRenderer& renderer, int num_frames) {
+    for (int i = 0; i < num_frames; ++i) {
+        renderer.commit();
+        renderer.render();
+        renderer.swap();
+    }
+    ovr::MainRenderer::FrameBufferData fb;
+    renderer.mapframe(&fb);
+    return fb;
+};
+
 auto render_to_image = [render_to_framebuffer](
         ovr::MainRenderer& renderer,
         py::object fbsize_obj,
         bool scrub,
         bool clip) {
         auto fb = render_to_framebuffer(renderer);
+        const float* frame = (const float*)fb.rgba->to_cpu()->data();
+        const auto count = fb.rgba->get_size<float>();
+
+        std::vector<py::ssize_t> shape;
+        if (fbsize_obj.is_none()) {
+                shape = { (py::ssize_t)count };
+        }
+        else {
+                const auto fbsize = fbsize_obj.cast<ovr::vec2i>();
+                const auto expected = (size_t)fbsize.x * (size_t)fbsize.y * 4;
+                if (expected != count) {
+                        throw std::runtime_error("fbsize does not match mapped RGBA buffer size");
+                }
+                shape = { (py::ssize_t)fbsize.y, (py::ssize_t)fbsize.x, 4 };
+        }
+
+        py::array_t<float> result(shape);
+        auto* out = (float*)result.mutable_data();
+        for (size_t i = 0; i < count; ++i) {
+                float value = frame[i];
+                if (scrub && !std::isfinite(value)) {
+                        value = value > 0.f ? 1.f : 0.f;
+                }
+                if (clip) {
+                        value = std::min(1.f, std::max(0.f, value));
+                }
+                out[i] = value;
+        }
+        return result;
+};
+
+// TODO: consolidate into 'render_to_image'
+auto render_to_image_accumulated = [render_to_framebuffer_accumulated](
+        ovr::MainRenderer& renderer,
+        py::object fbsize_obj,
+        int num_frames,
+        bool scrub,
+        bool clip) {
+        auto fb = render_to_framebuffer_accumulated(renderer, num_frames);
         const float* frame = (const float*)fb.rgba->to_cpu()->data();
         const auto count = fb.rgba->get_size<float>();
 
@@ -262,6 +313,57 @@ numpy.ndarray
     A copied float32 RGBA array.
 )pbdoc");
 
+// TODO: consolidate into 'render_to_framebuffer'
+m.def("render_to_framebuffer_accumulated", render_to_framebuffer_accumulated,
+      py::arg("renderer"),
+      py::arg("num_frames") = 1,
+      R"pbdoc(
+Render multiple frames and return the accumulated framebuffer.
+
+Calls ``commit()``, ``render()``, and ``swap()`` ``num_frames`` times before
+mapping the result. Useful with ``frame_accumulation=True`` to reduce noise.
+
+Parameters
+----------
+renderer:
+    An initialized ``ovrpy.Renderer``.
+num_frames:
+    Number of frames to accumulate. Defaults to 1.
+
+Returns
+-------
+ovrpy.FrameBufferData
+)pbdoc");
+
+// TODO: consolidate into 'render_to_image'
+m.def("render_to_image_accumulated", render_to_image_accumulated,
+      py::arg("renderer"),
+      py::arg("fbsize") = py::none(),
+      py::arg("num_frames") = 1,
+      py::kw_only(),
+      py::arg("scrub") = true,
+      py::arg("clip") = false,
+      R"pbdoc(
+Render multiple frames and return a detached float32 RGBA NumPy array.
+
+Parameters
+----------
+renderer:
+    An initialized ``ovrpy.Renderer``.
+fbsize:
+    Optional ``ovrpy.vec2i`` framebuffer size.
+num_frames:
+    Number of frames to accumulate. Defaults to 1.
+scrub:
+    Replace non-finite values with finite display-friendly values.
+clip:
+    Clamp values to ``[0.0, 1.0]``.
+
+Returns
+-------
+numpy.ndarray
+)pbdoc");
+
 m.def("render_scene_to_image",
       [render_to_image](
               const std::string& backend,
@@ -345,6 +447,56 @@ Returns
 numpy.ndarray
     A copied float32 RGBA array with shape ``(fbsize.y, fbsize.x, 4)``.
 )pbdoc");
+
+// TODO: consolidate into 'render_scene_to_image'
+m.def("render_scene_to_image_accumulated",
+      [render_to_image_accumulated](          // <-- capture new lambda
+              const std::string& backend,
+              ovr::scene::Scene scene,
+              ovr::vec2i fbsize,
+              py::object camera_obj,
+              py::object sample_per_pixel_obj,
+              py::object path_tracing_obj,
+              py::object frame_accumulation_obj,
+              py::object volume_sampling_rate_obj,
+              py::object volume_density_scale_obj,
+              int num_frames,                 // <-- new parameter
+              bool scrub,
+              bool clip) {
+              auto renderer = create_renderer(backend);
+              renderer->set_fbsize(fbsize);
+              const auto camera = camera_obj.is_none()
+                      ? scene.camera
+                      : camera_obj.cast<ovr::scene::Camera>();
+              renderer->init(0, nullptr, scene, camera);
+
+              if (!sample_per_pixel_obj.is_none())
+                      renderer->set_sample_per_pixel(sample_per_pixel_obj.cast<int>());
+              if (!path_tracing_obj.is_none())
+                      renderer->set_path_tracing(path_tracing_obj.cast<bool>());
+              if (!frame_accumulation_obj.is_none())
+                      renderer->set_frame_accumulation(frame_accumulation_obj.cast<bool>());
+              if (!volume_sampling_rate_obj.is_none())
+                      renderer->set_volume_sampling_rate(volume_sampling_rate_obj.cast<float>());
+              if (!volume_density_scale_obj.is_none())
+                      renderer->set_volume_density_scale(volume_density_scale_obj.cast<float>());
+
+              return render_to_image_accumulated(*renderer, py::cast(fbsize), num_frames, scrub, clip); // <-- updated
+      },
+      py::arg("backend"),
+      py::arg("scene"),
+      py::arg("fbsize"),
+      py::kw_only(),
+      py::arg("camera") = py::none(),
+      py::arg("sample_per_pixel") = py::none(),
+      py::arg("path_tracing") = py::none(),
+      py::arg("frame_accumulation") = py::none(),
+      py::arg("volume_sampling_rate") = py::none(),
+      py::arg("volume_density_scale") = py::none(),
+      py::arg("num_frames") = 1,             // <-- new arg with default
+      py::arg("scrub") = true,
+      py::arg("clip") = false,
+      R"pbdoc(...)pbdoc");
 
 def_named_method(create_renderer, "create_renderer");
 
