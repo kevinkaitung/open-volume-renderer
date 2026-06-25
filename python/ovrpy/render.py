@@ -51,6 +51,7 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Enable path tracing instead of ray marching.",
     )
+    parser.add_argument("--n_frames", type=int, default=1, help="Number of frames.")
     return parser.parse_args()
 
 
@@ -71,18 +72,28 @@ def main() -> int:
     fbsize.x = args.width
     fbsize.y = args.height
 
-    rgba = ovrpy.render_scene_to_image(
+    # # Create camera
+    # camera = ovrpy.Camera()
+    # camera.eye = ovrpy.vec3f(128.0, -128.0, 256.0)   # camera position
+    # camera.at  = ovrpy.vec3f(128.0, 256.0, 256.0)   # look-at point
+    # camera.up  = ovrpy.vec3f(1.0, 0.0, 0.0)   # up vector
+
+    rgba = ovrpy.render_scene_to_image_accumulated(
         args.backend,
         scene,
         fbsize,
+        # camera=camera,
         sample_per_pixel=args.spp,
         path_tracing=args.path_tracing,
+        frame_accumulation=True,
         volume_sampling_rate=args.volume_sampling_rate,
         volume_density_scale=args.density_scale,
+        num_frames=args.n_frames,
         clip=True,
     )
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
+    rgba = np.flipud(rgba)  # flip vertically
     Image.fromarray((rgba * 255.0 + 0.5).astype(np.uint8), mode="RGBA").save(args.output)
     print(f"Wrote {args.output}")
     return 0
