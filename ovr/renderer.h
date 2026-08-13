@@ -153,6 +153,7 @@ public:
   void set_volume_sampling_rate(float volume_sampling_rate) { params.volume_sampling_rate = volume_sampling_rate; }
   void set_volume_density_scale(float volume_density_scale) { params.volume_density_scale = volume_density_scale; }
   void set_tonemapping(bool tonemapping) { params.tonemapping = tonemapping; }
+  void set_shading_mode(int shading_mode) { params.shading_mode = shading_mode; }
 
   // setters for sparse sampling //
   void set_sparse_sampling(bool sparse_sampling) { params.sparse_sampling = sparse_sampling; }
@@ -175,6 +176,7 @@ protected:
     TransactionalValue<bool> path_tracing;
     TransactionalValue<bool> frame_accumulation;
     TransactionalValue<bool> tonemapping;
+    TransactionalValue<int> shading_mode;
     // options for sparse sampling 
     TransactionalValue<vec2f> focus_center;
     TransactionalValue<float> focus_scale;

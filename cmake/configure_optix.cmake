@@ -89,15 +89,23 @@ macro(cuda_compile_and_embed output_var cuda_file)
   set(_cae_embedded "${CMAKE_CURRENT_BINARY_DIR}/${_cae_base}_embedded.c")
 
   # ── step 1: compile to PTX ────────────────────────────────────────────────
+  # Emit an nvcc dependency file (-MD -MF) and hand it to CMake via DEPFILE so
+  # header changes (e.g. params.h / shaders_common.h) trigger a PTX rebuild.
+  # Without this, editing a header a .cu includes leaves its PTX stale -> the
+  # module's LaunchParams size no longer matches the host -> optixLaunch fails
+  # with INVALID_VALUE (7001).
+  set(_cae_depfile "${_cae_ptx}.d")
   add_custom_command(
     OUTPUT  "${_cae_ptx}"
     COMMAND ${CMAKE_CUDA_COMPILER}
             -ptx -std=c++17
             -arch=compute_${_cae_arch}
             ${_cae_opts} -DENABLE_OPTIX
+            -MD -MF "${_cae_depfile}"
             "${cuda_file}"
             -o "${_cae_ptx}"
     DEPENDS "${cuda_file}" ${in_DEPENDS}
+    DEPFILE "${_cae_depfile}"
     COMMENT "Compiling PTX: ${cuda_file}"
   )
 

@@ -53,6 +53,20 @@ namespace optix7 {
 #define VISIBILITY_VOLUME   (1ULL << 0)
 #define VISIBILITY_GEOMETRY (1ULL << 1)
 
+// Phong material coefficients (ambient/diffuse/specular + shininess), ported
+// from instant-vnr's SciVisMaterial so the SCIVIS shading mode matches it.
+struct PhongMaterial { float ambient, diffuse, specular, shininess; };
+
+// Raymarching shading model selector (see the switch in shaders_raymarching.cu).
+// NOTE: modes 2 and 3 are EXPERIMENTAL -- their usefulness for the shading study is
+// not yet decided. Kept on record for now; may be removed if they prove unneeded.
+enum ShadingMode {
+  SHADING_OPTIX7_NATIVE   = 0, // current: ambient + directional light + ray-traced shadow
+  SHADING_SCIVIS          = 1, // instant-vnr Blinn-Phong + headlight blend
+  SHADING_HEADLIGHT_ONLY  = 2, // [EXPERIMENTAL / necessity TBD] pure headlight (shade_simple_light)
+  SHADING_FIXED_NO_SHADOW = 3, // [EXPERIMENTAL / necessity TBD] fixed directional light, two-sided, no shadow
+};
+
 struct LaunchParams { // shared global data
   struct DeviceFrameBuffer {
     vec4f* rgba;
@@ -81,6 +95,14 @@ struct LaunchParams { // shared global data
 
   vec3f light_directional_pos{ -907.108f, 2205.875f, -400.0267f };
   float light_ambient_intensity{ 1.5f };
+
+  // Shading-mode switch + parameters for the ported instant-vnr shading model.
+  // Defaults reproduce instant-vnr's own defaults so SHADING_SCIVIS matches it.
+  int          shading_mode{ SHADING_OPTIX7_NATIVE }; // default = current behavior
+  PhongMaterial mat_scivis{ .6f, .9f, .4f, 40.f };
+  float        scivis_shading_scale{ 0.95f };
+  vec3f        l_distant_color{ 1.5f };
+  vec3f        l_distant_direction{ 0.f, 0.f, 1.f };  // instant-vnr default (+Z)
 
   float base_noise{ 0.1f };
   vec2f focus_center{ 0.5f, 0.5f };

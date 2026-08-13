@@ -133,28 +133,51 @@ raymarching(const DeviceStructuredRegularVolume& self,
     /* optical flow*/
     const vec2f optical_flow = compute_optical_flow(pos);
 
-    /* shade volume */ // TODO better shading //
-    vec3f light_dir = normalize(optix_launch_params.light_directional_pos);
-    vec3f light_rgb = vec3f(2.f);
-    {
+    /* shade volume */
+    const vec3f albedo = rgba.xyz();
+    switch (optix_launch_params.shading_mode) {
+
+    case SHADING_OPTIX7_NATIVE: { // ambient + directional light + ray-traced shadow
+      vec3f light_dir = normalize(optix_launch_params.light_directional_pos);
+      vec3f light_rgb = vec3f(2.f);
       ShadowPayload shadow;
       shadow.rng = payload.rng;
       shadow.t_max = 0.f;
       uint32_t u0, u1;
       pack_pointer(&shadow, u0, u1);
-      // while (shadow.t_max < inf) 
-      {
-        optixTrace(optix_launch_params.traversable,
-                   /*org=*/pos, /*dir=*/light_dir, /*tmin=*/shadow.t_max, /*tmax=*/inf, /*time=*/0.0f,
-                   OptixVisibilityMask(255), /* not just volume */
-                   OPTIX_RAY_FLAG_DISABLE_ANYHIT,
-                   SHADOW_RAY_TYPE, // SBT offset
-                   RAY_TYPE_COUNT,  // SBT stride
-                   SHADOW_RAY_TYPE, // miss SBT index
-                   u0, u1);
-      }
+      optixTrace(optix_launch_params.traversable,
+                 /*org=*/pos, /*dir=*/light_dir, /*tmin=*/shadow.t_max, /*tmax=*/inf, /*time=*/0.0f,
+                 OptixVisibilityMask(255), /* not just volume */
+                 OPTIX_RAY_FLAG_DISABLE_ANYHIT,
+                 SHADOW_RAY_TYPE, // SBT offset
+                 RAY_TYPE_COUNT,  // SBT stride
+                 SHADOW_RAY_TYPE, // miss SBT index
+                 u0, u1);
       const float cosNL = fabs(dot(light_dir, normal_w));
       rgba.xyz() *= 0.5f + 0.5f * cosNL * light_rgb * (1.f - shadow.alpha);
+      break;
+    }
+
+    case SHADING_SCIVIS: { // instant-vnr Blinn-Phong + headlight blend (no shadow ray)
+      const vec3f shaded = shade_scivis_light(dir, normal_w, albedo,
+          optix_launch_params.mat_scivis, vec3f(1.f),
+          optix_launch_params.l_distant_color, optix_launch_params.l_distant_direction);
+      rgba.xyz() = mix_vnr(albedo, shaded, optix_launch_params.scivis_shading_scale);
+      break;
+    }
+
+    case SHADING_HEADLIGHT_ONLY: { // pure headlight, light glued to the view direction
+      rgba.xyz() = shade_simple_light(dir, normal_w, albedo);
+      break;
+    }
+
+    case SHADING_FIXED_NO_SHADOW: { // fixed world-space light, two-sided diffuse, no shadow
+      const vec3f L = normalize(optix_launch_params.l_distant_direction);
+      if (dot(normal_w, normal_w) > 1.0e-6f)
+        rgba.xyz() = albedo * (0.2f + 0.8f * fabsf(dot(L, normalize(normal_w))));
+      break;
+    }
+
     }
 
     /* blending */ /* clang-format off */

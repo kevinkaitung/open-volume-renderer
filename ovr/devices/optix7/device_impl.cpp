@@ -199,6 +199,11 @@ DeviceOptix7::Impl::commit()
     framebuffer_reset = true;
   }
 
+  if (parent->params.shading_mode.update()) {
+    params.shading_mode = parent->params.shading_mode.ref();
+    framebuffer_reset = true;
+  }
+
   if (parent->params.sparse_sampling.update()) {
     params.enable_sparse_sampling = parent->params.sparse_sampling.ref();
     framebuffer_reset = true;

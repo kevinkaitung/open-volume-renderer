@@ -153,7 +153,15 @@ OVR_PY_STRUCT_PTR(ovr::MainRenderer, "Renderer")
 .def_class_method(ovr::MainRenderer, set_path_tracing)
 .def_class_method(ovr::MainRenderer, set_frame_accumulation)
 .def_class_method(ovr::MainRenderer, set_volume_sampling_rate)
-.def_class_method(ovr::MainRenderer, set_volume_density_scale);
+.def_class_method(ovr::MainRenderer, set_volume_density_scale)
+.def_class_method(ovr::MainRenderer, set_shading_mode);
+
+// Raymarching shading-mode constants (mirror enum ShadingMode in optix7/params.h).
+// These only take effect in the raymarching pipeline (set_path_tracing(False)).
+m.attr("SHADING_OPTIX7_NATIVE")   = 0;
+m.attr("SHADING_SCIVIS")          = 1;
+m.attr("SHADING_HEADLIGHT_ONLY")  = 2;
+m.attr("SHADING_FIXED_NO_SHADOW") = 3;
 
 auto render_to_framebuffer = [](ovr::MainRenderer& renderer) {
         renderer.commit();

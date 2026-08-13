@@ -122,6 +122,50 @@ corrected_value(const vec3f in)
 
 } // namespace
 
+// ------------------------------------------------------------------------------
+// Shading helpers ported from instant-vnr (raytracing.h:225-257).
+// NOTE: instant-vnr's lerp(r,a,b) = (1-r)*a + r*b is replaced by mix_vnr() here
+// because this repo already defines a different lerp(a,b,t) (reversed args) in
+// cuda_math.h; reusing it would silently invert the blend. std::max is likewise
+// replaced by fmaxf for device safety. Semantics are otherwise identical.
+// ------------------------------------------------------------------------------
+static __forceinline__ __device__ vec3f
+mix_vnr(const vec3f& a, const vec3f& b, float r) { return (1.f - r) * a + r * b; }
+
+// Headlight term: ambient floor + two-sided diffuse with the light glued to the
+// view direction (L = -ray_dir). No specular.
+static __forceinline__ __device__ vec3f
+shade_simple_light(const vec3f& ray_dir, const vec3f& normal, const vec3f& albedo)
+{
+  if (dot(normal, normal) > 1.0e-6f)
+    return albedo * (0.2f + 0.8f * fabsf(dot(-ray_dir, normalize(normal))));
+  return vec3f(0.f);
+}
+
+// Blinn-Phong (ambient + diffuse + half-vector specular) blended 50/50 with the
+// headlight term. light_ambient is unused (dead in instant-vnr too) but kept so
+// the signature mirrors the source.
+static __forceinline__ __device__ vec3f
+shade_scivis_light(const vec3f& ray_dir, const vec3f& normal, const vec3f& albedo,
+                   const PhongMaterial& mat, const vec3f& light_ambient,
+                   const vec3f& light_diffuse, const vec3f& light_dir)
+{
+  vec3f color = vec3f(0.f);
+  if (dot(normal, normal) > 1.0e-6f) {
+    const vec3f L = normalize(light_dir);
+    const vec3f N = normalize(normal);
+    const vec3f V = -ray_dir;
+    color += mat.ambient * albedo;
+    const float cosNL = fmaxf(dot(N, L), 0.f);
+    if (cosNL > 0.f) {
+      color += mat.diffuse * cosNL * albedo * light_diffuse;
+      const vec3f H = normalize(L + V);
+      color += mat.specular * powf(fmaxf(dot(N, H), 0.f), mat.shininess) * light_diffuse;
+    }
+  }
+  return mix_vnr(shade_simple_light(ray_dir, normal, albedo), color, 0.5f);
+}
+
 static __forceinline__ __device__ void*
 unpack_pointer(uint32_t i0, uint32_t i1)
 {
