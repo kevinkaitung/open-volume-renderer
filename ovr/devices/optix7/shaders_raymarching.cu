@@ -171,10 +171,44 @@ raymarching(const DeviceStructuredRegularVolume& self,
       break;
     }
 
-    case SHADING_FIXED_NO_SHADOW: { // fixed world-space light, two-sided diffuse, no shadow
+    case SHADING_FIXED_NO_SHADOW: {
       const vec3f L = normalize(optix_launch_params.l_distant_direction);
-      if (dot(normal_w, normal_w) > 1.0e-6f)
-        rgba.xyz() = albedo * (0.2f + 0.8f * fabsf(dot(L, normalize(normal_w))));
+      // fixed world-space light, two-sided diffuse, no shadow
+      // if (dot(normal_w, normal_w) > 1.0e-6f)
+      //   rgba.xyz() = albedo * (0.2f + 0.8f * fabsf(dot(L, normalize(normal_w))));
+      // break;
+
+      // wrap / half-lambert
+      // const float ndl = dot(L, normalize(normal_w));
+      // rgba.xyz() = albedo * (0.2f + 0.8f * (0.5f + 0.5f * ndl));
+      // // simplifies to: albedo * (0.6f + 0.4f * ndl)
+      // break;
+
+      // one-sided diffuse
+      // if (dot(normal_w, normal_w) > 1.0e-6f) {
+      //   const float ndl = fmaxf(0.f, dot(L, normalize(normal_w)));  // clamp negatives to 0
+      //   rgba.xyz() = albedo * (0.2f + 0.8f * ndl);
+      // }
+      // break;
+
+      // wrap / half-lambert with one key light and one fill(weak) light
+      if (dot(normal_w, normal_w) > 1.0e-6f) {
+        const vec3f N = normalize(normal_w);
+
+        // both world-fixed → view-consistent
+        const vec3f L_key  = normalize(optix_launch_params.l_distant_direction);
+        const vec3f L_fill = normalize(vec3f(0.0f, 0.5f, 0.5f)); // offset, NOT -L_key
+
+        // half-Lambert on each
+        const float key  = 0.5f + 0.5f * dot(L_key,  N);
+        const float fill = 0.5f + 0.5f * dot(L_fill, N);
+
+        const float ambient   = 0.15f;
+        const float key_gain  = 0.65f;
+        const float fill_gain = 0.20f;   // weak
+
+        rgba.xyz() = albedo * (ambient + key_gain * key + fill_gain * fill);
+      }
       break;
     }
 

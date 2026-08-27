@@ -102,7 +102,7 @@ struct LaunchParams { // shared global data
   PhongMaterial mat_scivis{ .6f, .9f, .4f, 40.f };
   float        scivis_shading_scale{ 0.95f };
   vec3f        l_distant_color{ 1.5f };
-  vec3f        l_distant_direction{ 0.f, 0.f, 1.f };  // instant-vnr default (+Z)
+  vec3f        l_distant_direction{ 1.f, -0.5f, -0.5f };  // tuned for CQ500 dataset
 
   float base_noise{ 0.1f };
   vec2f focus_center{ 0.5f, 0.5f };
