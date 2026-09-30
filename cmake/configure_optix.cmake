@@ -58,13 +58,21 @@ macro(cuda_compile_and_embed output_var cuda_file)
   # ── build include list ────────────────────────────────────────────────────
   set(_cae_opts ${in_OPTIONS} -Xcudafe="--diag_suppress=20044")
   list(APPEND _cae_opts "-I${OptiX_INCLUDE}")
-  if(CUDAToolkit_INCLUDE_DIRS)
-    list(APPEND _cae_opts "-I${CUDAToolkit_INCLUDE_DIRS}")
-  endif()
+  # NOTE: CUDAToolkit_INCLUDE_DIRS is a list (CUDA 13+ adds include/cccl), so prefix every
+  # entry. "-I${list}" would emit the 2nd path as a bare arg -> nvcc treats it as a 2nd input
+  # file ("A single input file is required for a non-link phase ...").
+  foreach(_cae_path ${CUDAToolkit_INCLUDE_DIRS})
+    list(APPEND _cae_opts "-I${_cae_path}")
+  endforeach()
   foreach(_cae_tar ${in_LINK})
     get_target_property(_cae_inc ${_cae_tar} INTERFACE_INCLUDE_DIRECTORIES)
     if(_cae_inc)
       foreach(_cae_path ${_cae_inc})
+        # NOTE: $<INSTALL_INTERFACE:...> is empty at build time; "-I" + empty would swallow
+        # the next nvcc argument as the include dir, so skip install-only entries
+        if(_cae_path MATCHES "^\\$<INSTALL_INTERFACE:")
+          continue()
+        endif()
         list(APPEND _cae_opts "-I${_cae_path}")
       endforeach()
     endif()
